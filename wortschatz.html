@@ -99,6 +99,16 @@ button:focus-visible, .art-btn:focus-visible { outline: 2px solid var(--focus); 
 .export-btn { border: 1px solid var(--accent); background: var(--paper); color: var(--accent); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .export-btn:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
 .export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.io { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.import-panel { background: var(--paper); border: 1px solid var(--accent); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.import-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0; }
+.import-panel p { margin: 0; color: var(--muted); font-size: 14px; }
+.import-panel .stats { color: var(--ink); font-variant-numeric: tabular-nums; }
+.import-panel .preview { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.import-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-danger-outline { border: 1px solid var(--danger); background: transparent; color: var(--danger); border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
+.btn-danger-outline:hover { background: var(--danger); color: var(--paper); }
 .search input { padding: 8px 12px; background: var(--paper); }
 
 /* List */
@@ -178,9 +188,14 @@ ol.list { list-style: none; margin: 0; padding: 0; background: var(--paper); bor
       <label class="sr" for="searchInput">Поиск</label>
       <input type="text" id="searchInput" placeholder="Поиск…">
     </div>
-    <button type="button" class="export-btn" id="exportBtn" title="Скачать весь список в текущей сортировке">Скачать .txt</button>
+    <div class="io">
+      <button type="button" class="export-btn" id="importBtn" title="Загрузить слова из текстового файла">Загрузить .txt</button>
+      <button type="button" class="export-btn" id="exportBtn" title="Скачать весь список в текущей сортировке">Скачать .txt</button>
+    </div>
+    <input type="file" id="importFile" accept=".txt,text/plain" hidden>
   </div>
 
+  <div id="importArea"></div>
   <div id="listArea"></div>
   <p class="footnote" id="storageNote"></p>
 </div>
@@ -313,6 +328,8 @@ ol.list { list-style: none; margin: 0; padding: 0; background: var(--paper); bor
     $('sortTime').setAttribute('aria-pressed', String(state.sort === 'time'));
     $('sortAlpha').setAttribute('aria-pressed', String(state.sort === 'alpha'));
     $('exportBtn').disabled = !state.ready || !n;
+    $('importBtn').disabled = !state.ready;
+    renderImport();
     $('dirBtn').textContent = state.sort === 'alpha'
       ? (state.dir === 'asc' ? 'A → Z' : 'Z → A')
       : (state.dir === 'asc' ? 'Сначала старые' : 'Сначала новые');
@@ -488,6 +505,103 @@ ol.list { list-style: none; margin: 0; padding: 0; background: var(--paper); bor
     });
     return lines.join('\r\n') + '\r\n';
   }
+  // ---------- Import from .txt ----------
+  // Accepts the app's own export and simple hand-written lists:
+  //   "1. der Apfel — яблоко", "Apfel - яблоко", "laufen<TAB>бегать", "das Buch"
+  function parseTxt(text) {
+    const items = [];
+    const seen = new Set();
+    let skipped = 0;
+    text.replace(/^﻿/, '').split(/\r?\n/).forEach((raw) => {
+      let line = raw.trim();
+      if (!line) return;
+      if (/^(Mein Wortschatz\b|Сортировка:|Дата:)/i.test(line)) return;
+      line = line.replace(/^\d+\s*[.)]\s*/, '');           // leading numbering
+      let de = line, ru = '';
+      const m = line.match(/\t|\s+[—–-]\s+|\s+=\s+/);      // separator with spaces, so E-Mail stays whole
+      if (m) { de = line.slice(0, m.index); ru = line.slice(m.index + m[0].length); }
+      de = norm(de); ru = norm(ru);
+      let article = '';
+      const a = de.match(/^(der|die|das)\s+(.+)$/i);
+      if (a) { article = a[1].toLowerCase(); de = a[2]; }
+      if (!de || de.length > 80) { skipped++; return; }
+      const key = de.toLocaleLowerCase('de');
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push({ de, article, ru: ru.slice(0, 120) });
+    });
+    return { items, skipped };
+  }
+
+  $('importBtn').onclick = () => { $('importFile').value = ''; $('importFile').click(); };
+  $('importFile').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    let text = '';
+    try { text = await file.text(); } catch (err) { toast('Не удалось прочитать файл'); return; }
+    const { items, skipped } = parseTxt(text);
+    if (!items.length) { toast('В файле не нашлось слов. Нужна одна строка на слово.'); return; }
+    const fresh = items.filter((it) => !findDuplicate(it.de));
+    state.importPreview = { name: file.name, items, fresh, dups: items.length - fresh.length, skipped };
+    render();
+    $('importArea').scrollIntoView({ block: 'nearest' });
+  });
+
+  function renderImport() {
+    const area = $('importArea');
+    area.replaceChildren();
+    const ip = state.importPreview;
+    if (!ip) return;
+    const box = el('div', 'import-panel');
+    box.setAttribute('role', 'region');
+    box.setAttribute('aria-label', 'Загрузка списка');
+    box.append(el('h2', null, 'Файл «' + ip.name + '»'));
+    let stats = 'Найдено ' + ip.items.length + ' ' + plural(ip.items.length) + ': новых ' + ip.fresh.length + ', уже в списке ' + ip.dups + '.';
+    if (ip.skipped) stats += ' Пропущено строк: ' + ip.skipped + ' (слишком длинные).';
+    box.append(el('p', 'stats', stats));
+    const sample = ip.items.slice(0, 5).map((it) => (it.article ? it.article + ' ' : '') + it.de + (it.ru ? ' — ' + it.ru : '')).join(' · ');
+    box.append(el('p', 'preview', 'Например: ' + sample + (ip.items.length > 5 ? ' …' : '')));
+
+    const act = el('div', 'import-actions');
+    const addBtn = el('button', 'btn-primary', ip.fresh.length ? 'Добавить новые (' + ip.fresh.length + ')' : 'Новых слов нет');
+    addBtn.type = 'button'; addBtn.disabled = !ip.fresh.length;
+    addBtn.onclick = () => applyImport(false);
+    act.append(addBtn);
+    if (state.words.length) {
+      const rep = el('button', 'btn-danger-outline', 'Заменить весь список');
+      rep.type = 'button';
+      rep.title = 'Текущие ' + state.words.length + ' ' + plural(state.words.length) + ' будут удалены';
+      rep.onclick = () => applyImport(true);
+      act.append(rep);
+    }
+    const cancel = el('button', 'ghost', 'Отмена'); cancel.type = 'button';
+    cancel.onclick = () => { state.importPreview = null; render(); };
+    act.append(cancel);
+    box.append(act);
+    if (state.words.length) box.append(el('p', null, 'При замене текущий список удалится. Сначала можно скачать его через «Скачать .txt».'));
+    area.append(box);
+  }
+
+  async function applyImport(replace) {
+    const ip = state.importPreview;
+    if (!ip) return;
+    const src = replace ? ip.items : ip.fresh;
+    const base = Date.now();
+    // createdAt keeps the file's line order when sorting by time
+    const words = src.map((it, i) => ({ id: newId(), de: it.de, article: it.article, ru: it.ru, createdAt: base + i, updatedAt: null }));
+    state.importPreview = null;
+    if (state.mode === 'db') {
+      if (replace) for (const w of state.words.slice()) { try { await coll.doc(w.id).delete(); } catch (e) {} }
+      for (const w of words) await saveWord(w);
+    } else {
+      state.words = replace ? words : state.words.concat(words);
+      lsSave();
+    }
+    state.editingId = null; state.confirmId = null;
+    render();
+    toast((replace ? 'Список заменён: ' : 'Добавлено ') + words.length + ' ' + plural(words.length));
+  }
+
   $('exportBtn').onclick = () => {
     if (!state.words.length) return;
     const d = new Date();
