@@ -3,6 +3,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<script>
+/* apply the saved theme before first paint */
+try { var t = localStorage.getItem('wortschatz.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 <style>
 /* Layout: one narrow column like a vocabulary notebook — add-form on top, toolbar, numbered list */
 :root {
@@ -49,6 +53,16 @@ header { display: flex; align-items: flex-end; justify-content: space-between; g
 h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(28px, 6vw, 38px); line-height: 1.05; margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
 h1 span { color: var(--accent); }
 .count { font-family: var(--font-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.header-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.theme-seg button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 13px; }
+.theme-seg svg { width: 14px; height: 14px; flex: none; }
+@media (max-width: 480px) {
+  header { align-items: flex-start; }
+  .header-side { flex-direction: row-reverse; align-items: center; justify-content: space-between; width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body { transition: background-color .2s, color .2s; }
+}
 
 /* Add form */
 .add { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -151,7 +165,20 @@ ol.list { list-style: none; margin: 0; padding: 0; background: var(--paper); bor
 <div class="wrap">
   <header>
     <h1>Mein <span>Wortschatz</span></h1>
-    <div class="count" id="count"></div>
+    <div class="header-side">
+      <div class="seg theme-seg" role="group" aria-label="Тема оформления">
+        <button type="button" data-theme-choice="light" aria-pressed="false" title="Светлая тема">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg>Светлая
+        </button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false" title="Тёмная тема">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 9.8A5.5 5.5 0 0 1 6.2 2.5a5.5 5.5 0 1 0 7.3 7.3Z"/></svg>Тёмная
+        </button>
+        <button type="button" data-theme-choice="auto" aria-pressed="true" title="Как в системе">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11A5.5 5.5 0 0 0 8 2.5Z" fill="currentColor"/></svg>Авто
+        </button>
+      </div>
+      <div class="count" id="count"></div>
+    </div>
   </header>
 
   <form class="add" id="addForm" autocomplete="off">
@@ -616,6 +643,27 @@ ol.list { list-style: none; margin: 0; padding: 0; background: var(--paper); bor
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('Список сохранён: ' + name);
   };
+
+  // ---------- Theme ----------
+  const THEME_KEY = 'wortschatz.theme';
+  function currentTheme() {
+    const t = document.documentElement.getAttribute('data-theme');
+    return t === 'light' || t === 'dark' ? t : 'auto';
+  }
+  function applyTheme(choice) {
+    if (choice === 'light' || choice === 'dark') document.documentElement.setAttribute('data-theme', choice);
+    else document.documentElement.removeAttribute('data-theme');
+    try {
+      if (choice === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, choice);
+    } catch (e) {}
+    syncThemeButtons();
+  }
+  function syncThemeButtons() {
+    const cur = currentTheme();
+    document.querySelectorAll('[data-theme-choice]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === cur)));
+  }
+  document.querySelectorAll('[data-theme-choice]').forEach((b) => { b.onclick = () => applyTheme(b.dataset.themeChoice); });
+  syncThemeButtons();
 
   render();
   init();
